@@ -1,4 +1,4 @@
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 # Node's CA store is compiled in, and before 24.22.1 it trusts the compromised eMudhra
 # intermediates; a stale local node:24-alpine would otherwise build without complaint.
 RUN node -e "const [major, minor, patch] = process.versions.node.split('.').map(Number); \
