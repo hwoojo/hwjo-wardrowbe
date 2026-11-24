@@ -37,6 +37,31 @@ x-backend-env: &backend-env
   SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
 
 services:
+  # add: Ollama for local LLM 
+  ollama:
+    image: ollama/ollama:latest
+    pull_policy: never
+    container_name: wardrobe-ollama
+    restart: unless-stopped
+    user: "1056:999"
+
+    cpus: "4.0"
+
+    volumes:
+      - ./ollama-data:/home/ollama/.ollama
+
+    environment:
+      HOME: /home/ollama
+      OLLAMA_MODELS: /home/ollama/.ollama/models 
+      OLLAMA_NUM_PARALLEL: "1"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["GPU-086002b6-9733-7d29-9602-42303915ef53"] # hard-coded
+              capabilities: [gpu]
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
@@ -47,8 +72,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-wardrobe}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wardrobe}"]
       interval: 10s
@@ -62,8 +85,6 @@ services:
     container_name: wardrobe-redis
     volumes:
       - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -91,7 +112,7 @@ services:
     volumes:
       - wardrobe_data:/data/wardrobe
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8856}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,7 +146,7 @@ services:
       PUID: ${PUID:-1001}
       PGID: ${PGID:-1001}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-8854}:3000"
     depends_on:
       - backend
     restart: unless-stopped
