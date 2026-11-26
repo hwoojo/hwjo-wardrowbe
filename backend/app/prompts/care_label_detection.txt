@@ -1,0 +1,1 @@
+Summarize the care instructions shown on this garment care label in one short sentence in {language}. Keep it under 30 words. Do not guess. If there is no care label or it is unreadable, output only UNREADABLE.

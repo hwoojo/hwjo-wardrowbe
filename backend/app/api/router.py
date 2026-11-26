@@ -16,6 +16,7 @@ from app.api.preferences import router as preferences_router
 from app.api.split import router as split_router
 from app.api.users import router as users_router
 from app.api.weather import router as weather_router
+from app.api.care_label import router as care_label_router  
 
 api_router = APIRouter()
 
@@ -34,3 +35,4 @@ api_router.include_router(pairings_router)
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(analytics_router)
 api_router.include_router(learning_router)
+api_router.include_router(care_label_router)

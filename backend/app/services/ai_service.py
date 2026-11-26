@@ -85,6 +85,7 @@ DESCRIPTION_PROMPT = load_prompt("clothing_description")
 DETECTION_PROMPT = render_tagging_prompt(load_prompt("garment_detection")).replace(
     "<<EXAMPLE>>", json.dumps(DETECTION_EXAMPLE)
 )
+CARE_LABEL_PROMPT = load_prompt("care_label_detection")
 DESCRIPTION_LANGUAGES = {
     "en": "English",
     "zh-CN": "Simplified Chinese",
@@ -678,6 +679,54 @@ class AIService:
             raise error or RuntimeError("AI returned nothing usable")
         return parse_detection(content)
 
+
+    async def read_care_label(self, image_path: str | Path, locale: str)-> str | None: 
+        """Ask the vision model read care label and consider how to care that garment
+           Returns None when the label is missing or unreadable
+        """
+        # PIL preprocessing is CPU-bound and synchronous; run off the event loop so
+        # concurrent tagging jobs don't stall each other's in-flight HTTP reads.
+        image_base64 = await asyncio.to_thread(self._preprocess_image, image_path)
+
+        messages_desc = [
+            {
+                "role": "system",
+                "content": CARE_LABEL_PROMPT.format(
+                    language=DESCRIPTION_LANGUAGES.get(
+                        locale, DESCRIPTION_LANGUAGES[DEFAULT_LOCALE]
+                    )
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                    },
+                ],
+            },
+        ]
+
+        description, description_error, _ = await self._call_with_fallback(
+            messages_desc, "care_label"
+        )
+
+        if description:
+            description = description.strip()
+            for opening, closing in DESCRIPTION_QUOTES:
+                if description.startswith(opening) and description.endswith(closing):
+                    inner = description[len(opening) : -len(closing)]
+                    # A mark inside means the outer two belong to separate quoted spans
+                    # (a quoted brand at the start, a quoted colour at the end).
+                    if opening not in inner and closing not in inner:
+                        description = inner.strip()
+                    break
+            if description.rstrip(".").upper() == "UNREADABLE":
+                return None
+            return description
+        raise description_error or RuntimeError("AI returned no usable response")
+        
     async def check_health(self) -> dict:
         """Check health of all configured AI endpoints."""
         endpoints_health = []
