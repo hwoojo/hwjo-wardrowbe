@@ -288,6 +288,83 @@ export function useReplaceItemImage() {
   });
 }
 
+export interface CareLabelResponse {
+  care_label: string;
+}
+
+// Error codes the care-label endpoint puts in detail.error_code. 404 and 413 carry none, so the
+// caller reads those from the status.
+export type CareLabelErrorCode = 'CARE_LABEL_UNREADABLE' | 'AI_UNREACHABLE' | 'AI_VISION_DISABLED';
+
+// Reads a care-label photo with the vision model. The server saves the sentence to
+// tags.care_instructions itself, so the caches are patched with it rather than refetched first.
+export function useReadCareLabel() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async ({ itemId, file }: { itemId: string; file: File }) => {
+      const token = session?.accessToken || getAccessToken();
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE_PATH}/items/${itemId}/care-label`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+          headers,
+        });
+      } catch {
+        throw new NetworkError();
+      }
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message =
+          (typeof data.detail === 'string' ? data.detail : data.detail?.message) ||
+          'Failed to read care label';
+        throw new ApiError(message, response.status, data);
+      }
+
+      return response.json() as Promise<CareLabelResponse>;
+    },
+    onSuccess: ({ care_label }, { itemId }) => {
+      const withCare = (item: Item): Item => ({
+        ...item,
+        tags: { ...item.tags, care_instructions: care_label },
+      });
+      queryClient.setQueriesData({ queryKey: queryKeys.items.all }, (old: ItemListResponse | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          items: old.items.map((item) => (item.id === itemId ? withCare(item) : item)),
+        };
+      });
+      const cached = queryClient.getQueryData<Item>(queryKeys.item(itemId));
+      if (cached) {
+        queryClient.setQueryData<Item>(queryKeys.item(itemId), withCare(cached));
+      }
+      invalidateItemCaches(queryClient, itemId);
+    },
+  });
+}
+
+export function careLabelErrorCode(error: unknown): CareLabelErrorCode | null {
+  if (!(error instanceof ApiError)) return null;
+  const data = error.data as { detail?: { error_code?: string } } | undefined;
+  const code = data?.detail?.error_code;
+  return code === 'CARE_LABEL_UNREADABLE' || code === 'AI_UNREACHABLE' || code === 'AI_VISION_DISABLED'
+    ? code
+    : null;
+}
+
 export function useDeleteItem() {
   const queryClient = useQueryClient();
   const { data: session } = useSession();
@@ -569,10 +646,13 @@ export function useReanalyzeItem() {
   const { data: session } = useSession();
 
   return useMutation({
-    mutationFn: async (id: string) => {
+    // A plain id keeps the AI's answers for anything already set; with replace, the AI redoes its
+    // own earlier answers and only what a person edited is kept.
+    mutationFn: async (target: string | { id: string; replace?: boolean }) => {
+      const { id, replace } = typeof target === 'string' ? { id: target, replace: false } : target;
       applySessionToken(session);
       return api.post<{ job_id?: string; status: string; retry_after_seconds?: number }>(
-        `/items/${id}/analyze`
+        `/items/${id}/analyze${replace ? '?replace=true' : ''}`
       );
     },
     onSuccess: () => {

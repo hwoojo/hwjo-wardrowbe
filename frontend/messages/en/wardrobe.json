@@ -77,7 +77,7 @@
       "unknownError": "No reason was reported.",
       "unnamedItem": "Untitled item",
       "concurrency": "{count, plural, one {This instance analyzes # item at a time.} other {This instance analyzes # items at a time.}}",
-      "concurrencyLink": "Change this",
+      "concurrencyLink": "How to change this",
       "open": "View queue"
     },
     "queued": "Queued",
@@ -177,6 +177,24 @@
       "washed": "Item marked as washed"
     },
     "brand": "Brand",
+    "careLabel": {
+      "title": "Care instructions",
+      "upload": "Upload care label",
+      "reading": "Reading label...",
+      "success": "Care instructions saved",
+      "empty": "No care instructions yet. Upload a photo of the care label to read them.",
+      "emptyNoAi": "No care instructions yet.",
+      "errors": {
+        "unreadable": "Couldn't read a care label in that photo. Try a closer, sharper shot of the label.",
+        "aiUnreachable": "Couldn't reach the AI service. Please try again in a moment.",
+        "visionDisabled": "Image analysis is turned off on this server, so care labels can't be read.",
+        "notFound": "This item no longer exists.",
+        "tooLarge": "The photo is larger than {limit} MB. Please use a smaller image.",
+        "tooLargeNoLimit": "The photo is too large for the server to accept.",
+        "rateLimited": "Too many care labels read in a short time. Please wait a minute and try again.",
+        "generic": "Couldn't read the care label. Please try again."
+      }
+    },
     "name": "Name",
     "notes": "Notes",
     "placeholders": {
@@ -188,6 +206,12 @@
       "washIntervalDefault": "Default: {count}"
     },
     "primaryColor": "Primary Color",
+    "replaceAnalysis": {
+      "alreadyQueued": "This item is already being analyzed, so nothing was replaced. Try again when it finishes.",
+      "confirm": "Re-analyze and replace",
+      "description": "The AI looks at the photo again and replaces its earlier guesses. Tags you edited yourself are kept. Some edits from older versions were not recorded, so they can be replaced too.",
+      "title": "Re-analyze and replace AI tags?"
+    },
     "subtype": "Subtype",
     "tagsEditor": {
       "fit": "Fit",
@@ -207,6 +231,7 @@
       "analysisInProgress": "Analysis in progress...",
       "deleteImage": "Delete image",
       "findMatchingOutfits": "Find matching outfits",
+      "reanalyzeAndReplace": "Re-analyze and replace AI tags",
       "reanalyzeWithAI": "Re-analyze with AI",
       "removeBackground": "Remove background",
       "replaceImage": "Replace image",
@@ -304,7 +329,6 @@
     "dismissAll": "Dismiss all",
     "retry": "Retry",
     "dismiss": "Dismiss",
-    "unprotectedWarning": "{count, plural, one {# file could not be protected against interruption (storage full)} other {# files could not be protected against interruption (storage full)}} - keep this tab open until upload completes",
     "failure": {
       "tooLarge": "{name} is larger than {limit} MB",
       "tooLargeForServer": "{name} is too large for the server to accept",

@@ -15,6 +15,7 @@ import {
   Shirt,
   Sparkles,
   RefreshCw,
+  Replace,
   RotateCcw,
   RotateCw,
   Eraser,
@@ -29,6 +30,7 @@ import {
   Plus,
   Star,
   ImageIcon,
+  Upload,
 } from 'lucide-react';
 import {
   Dialog,
@@ -63,7 +65,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { toast } from 'sonner';
 import { SplitPhotoDialog } from '@/components/split-photo-dialog';
 import { ApiError } from '@/lib/api';
-import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useRestoreOriginal, useReplaceItemImage, useLogWear, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage } from '@/lib/hooks/use-items';
+import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useRestoreOriginal, useReplaceItemImage, useLogWear, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage, useReadCareLabel, careLabelErrorCode } from '@/lib/hooks/use-items';
 import { CLOTHING_SUBTYPES, Item } from '@/lib/types';
 import {
   useClothingTypes,
@@ -83,6 +85,7 @@ import { ColorEyedropper } from '@/components/color-eyedropper';
 import { ACCEPTED_IMAGE_INPUT } from '@/lib/image-types';
 import { GeneratePairingsDialog } from '@/components/generate-pairings-dialog';
 import { ItemTagsEditor } from '@/components/item-tags-editor';
+import { ReplaceAnalysisDialog } from '@/components/replace-analysis-dialog';
 import {
   diffTags,
   draftFromTags,
@@ -91,7 +94,7 @@ import {
   type ItemEdits,
   type TagDraft,
 } from '@/lib/tag-edits';
-import { useFeatures } from '@/lib/hooks/use-features';
+import { useAiUiEnabled, useFeatures } from '@/lib/hooks/use-features';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatDate } from '@/lib/utils';
 
@@ -160,6 +163,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const fitLabel = useFitLabel();
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
   const [showPairingsDialog, setShowPairingsDialog] = useState(false);
   const [imageKey, setImageKey] = useState(0);
   const [editForm, setEditForm] = useState<EditForm>({
@@ -192,7 +196,10 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const restoreOriginal = useRestoreOriginal();
   const replaceImage = useReplaceItemImage();
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
+  const readCareLabel = useReadCareLabel();
+  const careLabelInputRef = useRef<HTMLInputElement>(null);
   const { data: features } = useFeatures();
+  const aiUiEnabled = useAiUiEnabled();
   const logWear = useLogWear();
   const logWash = useLogWash();
   const { data: washHistory } = useWashHistory(item?.id || '');
@@ -301,11 +308,13 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     }
   };
 
-  const handleReanalyze = async () => {
+  const handleReanalyze = async (replace = false) => {
     try {
-      const result = await reanalyzeItem.mutateAsync(item.id);
+      const result = await reanalyzeItem.mutateAsync({ id: item.id, replace });
       if (result.status === 'cooldown' && result.retry_after_seconds) {
         toast.info(tw('ai.retryCooldown', { seconds: result.retry_after_seconds }));
+      } else if (replace && result.status === 'already_queued') {
+        toast.info(t('replaceAnalysis.alreadyQueued'));
       }
       // Otherwise status will update to 'processing' and UI will reflect it
     } catch (error) {
@@ -355,6 +364,42 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     } catch (error) {
       console.error('Failed to replace image:', error);
       toast.error(t('actions.imageReplaceError'));
+    }
+  };
+
+  const careLabelErrorMessage = (error: unknown): string => {
+    switch (careLabelErrorCode(error)) {
+      case 'CARE_LABEL_UNREADABLE':
+        return t('careLabel.errors.unreadable');
+      case 'AI_UNREACHABLE':
+        return t('careLabel.errors.aiUnreachable');
+      case 'AI_VISION_DISABLED':
+        return t('careLabel.errors.visionDisabled');
+    }
+    if (error instanceof ApiError) {
+      if (error.status === 404) return t('careLabel.errors.notFound');
+      if (error.status === 413) {
+        return features?.max_upload_size_mb
+          ? t('careLabel.errors.tooLarge', { limit: features.max_upload_size_mb })
+          : t('careLabel.errors.tooLargeNoLimit');
+      }
+      if (error.status === 429) return t('careLabel.errors.rateLimited');
+    }
+    return t('careLabel.errors.generic');
+  };
+
+  const handleCareLabel = async (file: File) => {
+    const maxMb = features?.max_upload_size_mb;
+    if (maxMb && file.size > maxMb * 1024 * 1024) {
+      toast.error(t('careLabel.errors.tooLarge', { limit: maxMb }));
+      return;
+    }
+    try {
+      await readCareLabel.mutateAsync({ itemId: item.id, file });
+      toast.success(t('careLabel.success'));
+    } catch (error) {
+      console.error('Failed to read care label:', error);
+      toast.error(careLabelErrorMessage(error));
     }
   };
 
@@ -408,38 +453,51 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                     }`}
                   />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowPairingsDialog(true)}
-                  disabled={item.status !== 'ready'}
-                  title={t('titles.findMatchingOutfits')}
-                >
-                  <Layers className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    onOpenChange(false);
-                    router.push(`/dashboard/suggest?item=${item.id}`);
-                  }}
-                  disabled={item.status !== 'ready'}
-                  title={t('titles.suggestOutfit')}
-                >
-                  <Sparkles className="h-5 w-5 text-primary" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleReanalyze}
-                  disabled={isAnalyzing}
-                  title={isAnalyzing ? t('titles.analysisInProgress') : t('titles.reanalyzeWithAI')}
-                >
-                  <RefreshCw
-                    className={`h-5 w-5 ${isAnalyzing ? 'animate-spin text-primary' : ''}`}
-                  />
-                </Button>
+                {aiUiEnabled && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowPairingsDialog(true)}
+                      disabled={item.status !== 'ready'}
+                      title={t('titles.findMatchingOutfits')}
+                    >
+                      <Layers className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        onOpenChange(false);
+                        router.push(`/dashboard/suggest?item=${item.id}`);
+                      }}
+                      disabled={item.status !== 'ready'}
+                      title={t('titles.suggestOutfit')}
+                    >
+                      <Sparkles className="h-5 w-5 text-primary" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleReanalyze()}
+                      disabled={isAnalyzing}
+                      title={isAnalyzing ? t('titles.analysisInProgress') : t('titles.reanalyzeWithAI')}
+                    >
+                      <RefreshCw
+                        className={`h-5 w-5 ${isAnalyzing ? 'animate-spin text-primary' : ''}`}
+                      />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowReplaceConfirm(true)}
+                      disabled={isAnalyzing}
+                      title={t('titles.reanalyzeAndReplace')}
+                    >
+                      <Replace className="h-5 w-5" />
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -957,6 +1015,57 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                     )}
                   </div>
 
+                  {/* Care Label */}
+                  <div className="space-y-2 pt-2 border-t" data-testid="care-label-section">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Tag className="h-4 w-4 text-muted-foreground" />
+                        {t('careLabel.title')}
+                      </div>
+                      {aiUiEnabled && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => careLabelInputRef.current?.click()}
+                            disabled={readCareLabel.isPending}
+                          >
+                            {readCareLabel.isPending ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <Upload className="h-3 w-3 mr-1" />
+                            )}
+                            {readCareLabel.isPending ? t('careLabel.reading') : t('careLabel.upload')}
+                          </Button>
+                          <input
+                            ref={careLabelInputRef}
+                            type="file"
+                            accept={ACCEPTED_IMAGE_INPUT}
+                            className="hidden"
+                            data-testid="care-label-input"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleCareLabel(file);
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </>
+                      )}
+                    </div>
+                    {tags.care_instructions ? (
+                      <p className="text-sm text-muted-foreground whitespace-pre-line">
+                        {tags.care_instructions}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {aiUiEnabled ? t('careLabel.empty') : t('careLabel.emptyNoAi')}
+                      </p>
+                    )}
+                  </div>
+
                   {/* Wear History */}
                   {item.wear_count > 0 && wearStats && (
                     <div className="space-y-2 pt-2 border-t">
@@ -1165,6 +1274,12 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
         />
       )}
 
+      <ReplaceAnalysisDialog
+        open={showReplaceConfirm}
+        onOpenChange={setShowReplaceConfirm}
+        onConfirm={() => handleReanalyze(true)}
+      />
+
       {/* Delete Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
@@ -1190,12 +1305,13 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Generate Pairings Dialog */}
-      <GeneratePairingsDialog
-        item={item}
-        open={showPairingsDialog}
-        onOpenChange={setShowPairingsDialog}
-      />
+      {aiUiEnabled && (
+        <GeneratePairingsDialog
+          item={item}
+          open={showPairingsDialog}
+          onOpenChange={setShowPairingsDialog}
+        />
+      )}
     </>
   );
 }
